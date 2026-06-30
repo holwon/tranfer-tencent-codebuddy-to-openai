@@ -169,53 +169,112 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key",
 };
 
-/** 伪装的正常 API 服务首页 */
+/** AI 研究网站伪装首页 */
 function homepage(): Response {
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CloudFlow API Gateway</title>
+<title>NeuralBridge AI Research Lab</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .container{max-width:720px;width:90%;text-align:center}
-  .logo{font-size:3rem;margin-bottom:1rem}
-  h1{font-size:1.8rem;font-weight:700;margin-bottom:.5rem;background:linear-gradient(135deg,#38bdf8,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-  .tagline{color:#94a3b8;font-size:1rem;margin-bottom:2rem}
-  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2.5rem}
-  .card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:1.2rem .8rem;transition:transform .2s}
-  .card:hover{transform:translateY(-2px)}
-  .card .icon{font-size:1.6rem;margin-bottom:.4rem}
-  .card h3{font-size:.85rem;font-weight:600;margin-bottom:.3rem}
-  .card p{font-size:.72rem;color:#94a3b8;line-height:1.4}
-  .endpoint{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:1.2rem;text-align:left;margin-bottom:2rem}
-  .method{display:inline-block;background:#22c55e;color:#000;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:4px;margin-right:.5rem}
-  .method.post{background:#3b82f6}
-  code{color:#38bdf8;font-size:.85rem}
-  .footer{color:#475569;font-size:.75rem}
-  .footer a{color:#64748b;text-decoration:none}
+  body{font-family:"Inter","SF Pro Display",system-ui,sans-serif;background:#09090b;color:#fafafa;min-height:100vh;overflow-x:hidden}
+  nav{display:flex;align-items:center;justify-content:space-between;padding:1.2rem 3rem;border-bottom:1px solid #1c1c1f}
+  .nav-brand{font-size:1.1rem;font-weight:700;letter-spacing:-.02em}
+  .nav-brand span{background:linear-gradient(135deg,#a78bfa,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .nav-links{display:flex;gap:2rem;font-size:.82rem;color:#71717a}
+  .nav-links a{color:#71717a;text-decoration:none;transition:color .2s}
+  .nav-links a:hover{color:#fafafa}
+  .hero{padding:6rem 3rem 4rem;text-align:center;max-width:900px;margin:0 auto}
+  .badge{display:inline-block;font-size:.7rem;font-weight:600;padding:.35rem .9rem;border-radius:999px;background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.2);margin-bottom:1.5rem;letter-spacing:.04em;text-transform:uppercase}
+  h1{font-size:3.2rem;font-weight:800;line-height:1.15;margin-bottom:1.2rem;letter-spacing:-.03em}
+  h1 em{font-style:normal;background:linear-gradient(135deg,#a78bfa,#60a5fa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .subtitle{font-size:1.05rem;color:#71717a;line-height:1.7;max-width:600px;margin:0 auto 3rem}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.5rem;max-width:900px;margin:0 auto 5rem;padding:0 3rem}
+  .card{background:#18181b;border:1px solid #27272a;border-radius:16px;padding:2rem 1.5rem;transition:border-color .3s}
+  .card:hover{border-color:#3f3f46}
+  .card-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;margin-bottom:1.2rem}
+  .card-icon.purple{background:rgba(167,139,250,.12);color:#a78bfa}
+  .card-icon.blue{background:rgba(96,165,250,.12);color:#60a5fa}
+  .card-icon.green{background:rgba(52,211,153,.12);color:#34d399}
+  .card h3{font-size:.95rem;font-weight:600;margin-bottom:.5rem}
+  .card p{font-size:.82rem;color:#71717a;line-height:1.6}
+  .section{max-width:900px;margin:0 auto;padding:0 3rem 5rem}
+  .section-title{font-size:1.6rem;font-weight:700;text-align:center;margin-bottom:.6rem;letter-spacing:-.02em}
+  .section-sub{text-align:center;color:#71717a;font-size:.9rem;margin-bottom:3rem}
+  .pub-list{display:flex;flex-direction:column;gap:1rem}
+  .pub{background:#18181b;border:1px solid #27272a;border-radius:12px;padding:1.2rem 1.5rem;display:flex;align-items:center;gap:1.2rem;transition:border-color .3s}
+  .pub:hover{border-color:#3f3f46}
+  .pub-tag{font-size:.65rem;font-weight:600;padding:.25rem .6rem;border-radius:6px;white-space:nowrap}
+  .pub-tag.nlp{background:rgba(167,139,250,.15);color:#a78bfa}
+  .pub-tag.vision{background:rgba(96,165,250,.15);color:#60a5fa}
+  .pub-tag.infra{background:rgba(52,211,153,.15);color:#34d399}
+  .pub-info h4{font-size:.88rem;font-weight:600;margin-bottom:.25rem}
+  .pub-info p{font-size:.75rem;color:#71717a}
+  .team{display:grid;grid-template-columns:repeat(4,1fr);gap:1.2rem;max-width:900px;margin:0 auto;padding:0 3rem 5rem}
+  .member{text-align:center}
+  .avatar{width:56px;height:56px;border-radius:50%;margin:0 auto .7rem;background:#27272a;display:flex;align-items:center;justify-content:center;font-size:1.2rem}
+  .member h4{font-size:.82rem;font-weight:600}
+  .member p{font-size:.7rem;color:#71717a}
+  footer{text-align:center;padding:2rem;border-top:1px solid #1c1c1f;color:#3f3f46;font-size:.72rem}
+  footer a{color:#52525b;text-decoration:none}
 </style>
 </head>
 <body>
-<div class="container">
-  <div class="logo">&#x2601;&#xFE0F;</div>
-  <h1>CloudFlow API Gateway</h1>
-  <p class="tagline">High-performance API relay &amp; protocol translation service</p>
-  <div class="cards">
-    <div class="card"><div class="icon">&#x26A1;</div><h3>Low Latency</h3><p>Edge-deployed relay nodes for minimal round-trip time</p></div>
-    <div class="card"><div class="icon">&#x1F512;</div><h3>Secure</h3><p>TLS 1.3 encryption with token-based authentication</p></div>
-    <div class="card"><div class="icon">&#x1F4CA;</div><h3>Observable</h3><p>Real-time metrics and structured logging</p></div>
+<nav>
+  <div class="nav-brand"><span>NeuralBridge</span></div>
+  <div class="nav-links">
+    <a href="#">Research</a><a href="#">Publications</a><a href="#">Team</a><a href="#">Blog</a><a href="#">Careers</a>
   </div>
-  <div class="endpoint">
-    <p style="margin-bottom:.6rem;font-weight:600">Available Endpoints</p>
-    <p style="margin-bottom:.5rem"><span class="method">GET</span> <code>/</code> <span style="color:#94a3b8">- Service info</span></p>
-    <p style="margin-bottom:.5rem"><span class="method post">POST</span> <code>/v1/chat/completions</code> <span style="color:#94a3b8">- Chat completions</span></p>
-    <p><span class="method">GET</span> <code>/health</code> <span style="color:#94a3b8">- Health check</span></p>
-  </div>
-  <div class="footer"><p>&copy; 2025 CloudFlow &middot; <a href="#">Documentation</a> &middot; <a href="#">Status</a></p></div>
+</nav>
+<div class="hero">
+  <div class="badge">Research Lab &mdash; Est. 2024</div>
+  <h1>Advancing <em>Intelligence</em> Through Open Research</h1>
+  <p class="subtitle">We study large language models, multi-modal reasoning, and efficient inference architectures. Our work bridges foundational research and real-world deployment.</p>
 </div>
+<div class="grid">
+  <div class="card">
+    <div class="card-icon purple">&#x1F9E0;</div>
+    <h3>Language Models</h3>
+    <p>Exploring instruction tuning, alignment techniques, and long-context reasoning for next-generation LLMs.</p>
+  </div>
+  <div class="card">
+    <div class="card-icon blue">&#x1F441;</div>
+    <h3>Multi-Modal Perception</h3>
+    <p>Building unified models that understand text, images, and audio with cross-modal attention mechanisms.</p>
+  </div>
+  <div class="card">
+    <div class="card-icon green">&#x2699;&#xFE0F;</div>
+    <h3>Inference Infrastructure</h3>
+    <p>Designing low-latency serving systems, speculative decoding pipelines, and edge deployment frameworks.</p>
+  </div>
+</div>
+<div class="section">
+  <div class="section-title">Recent Publications</div>
+  <div class="section-sub">Selected works from our research team</div>
+  <div class="pub-list">
+    <div class="pub">
+      <div class="pub-tag nlp">NLP</div>
+      <div class="pub-info"><h4>Efficient Long-Context Transformers via Adaptive Sparse Attention</h4><p>NeuralBridge &middot; arXiv 2025 &middot; Under Review</p></div>
+    </div>
+    <div class="pub">
+      <div class="pub-tag vision">Vision</div>
+      <div class="pub-info"><h4>Cross-Modal Alignment Without Paired Data: A Self-Supervised Approach</h4><p>NeuralBridge &middot; ICML 2025</p></div>
+    </div>
+    <div class="pub">
+      <div class="pub-tag infra">Infra</div>
+      <div class="pub-info"><h4>Latency-Aware Scheduling for Heterogeneous LLM Inference</h4><p>NeuralBridge &middot; OSDI 2025</p></div>
+    </div>
+  </div>
+</div>
+<div class="team">
+  <div class="member"><div class="avatar">&#x1F468;&#x200D;&#x1F4BB;</div><h4>Alex Chen</h4><p>Research Lead</p></div>
+  <div class="member"><div class="avatar">&#x1F469;&#x200D;&#x1F4BB;</div><h4>Sarah Liu</h4><p>NLP Researcher</p></div>
+  <div class="member"><div class="avatar">&#x1F468;&#x200D;&#x1F4BB;</div><h4>David Park</h4><p>Infra Engineer</p></div>
+  <div class="member"><div class="avatar">&#x1F469;&#x200D;&#x1F4BB;</div><h4>Mei Wang</h4><p>ML Researcher</p></div>
+</div>
+<footer>&copy; 2025 NeuralBridge AI Research &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a></footer>
 </body>
 </html>`;
   return new Response(html, {
@@ -229,7 +288,7 @@ function healthCheck(): Response {
   return new Response(
     JSON.stringify({
       status: "ok",
-      service: "cloudflow-api",
+      service: "neuralbridge-ai",
       version: "1.2.0",
       uptime: Math.floor(Date.now() / 1000),
     }),
