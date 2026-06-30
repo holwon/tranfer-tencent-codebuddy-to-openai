@@ -15,7 +15,9 @@ const VALID_FINISH_REASONS = new Set([
   null,
 ]);
 
-function convertDelta(cbDelta: Record<string, unknown>): Record<string, unknown> {
+function convertDelta(
+  cbDelta: Record<string, unknown>,
+): Record<string, unknown> {
   if (!cbDelta) return {};
   const result: Record<string, unknown> = {};
 
@@ -32,7 +34,9 @@ function convertDelta(cbDelta: Record<string, unknown>): Record<string, unknown>
   return result;
 }
 
-function convertChoice(cbChoice: Record<string, unknown>): Record<string, unknown> {
+function convertChoice(
+  cbChoice: Record<string, unknown>,
+): Record<string, unknown> {
   const result: Record<string, unknown> = { index: cbChoice.index ?? 0 };
 
   if (cbChoice.delta) {
@@ -62,7 +66,9 @@ function convertChoice(cbChoice: Record<string, unknown>): Record<string, unknow
   return result;
 }
 
-function convertResponse(cbData: Record<string, unknown>): Record<string, unknown> {
+function convertResponse(
+  cbData: Record<string, unknown>,
+): Record<string, unknown> {
   if (typeof cbData !== "object" || cbData === null) return cbData;
   const result: Record<string, unknown> = {};
 
@@ -73,7 +79,7 @@ function convertResponse(cbData: Record<string, unknown>): Record<string, unknow
 
   if (Array.isArray(cbData.choices)) {
     result.choices = cbData.choices.map((c) =>
-      convertChoice(c as Record<string, unknown>)
+      convertChoice(c as Record<string, unknown>),
     );
   }
   if (cbData.usage != null) {
@@ -83,7 +89,9 @@ function convertResponse(cbData: Record<string, unknown>): Record<string, unknow
   return result;
 }
 
-function convertRequest(reqBody: Record<string, unknown>): Record<string, unknown> {
+function convertRequest(
+  reqBody: Record<string, unknown>,
+): Record<string, unknown> {
   return { ...reqBody };
 }
 
@@ -120,7 +128,9 @@ async function handleStreamResponse(
             const parsed = JSON.parse(trimmed.slice(6));
             const converted = convertResponse(parsed);
             await writer.write(
-              new TextEncoder().encode(`data: ${JSON.stringify(converted)}\n\n`),
+              new TextEncoder().encode(
+                `data: ${JSON.stringify(converted)}\n\n`,
+              ),
             );
           } catch {
             await writer.write(new TextEncoder().encode(`${trimmed}\n\n`));
@@ -142,9 +152,7 @@ async function handleStreamResponse(
             new TextEncoder().encode(`data: ${JSON.stringify(converted)}\n\n`),
           );
         } catch {
-          await writer.write(
-            new TextEncoder().encode(`${buffer.trim()}\n\n`),
-          );
+          await writer.write(new TextEncoder().encode(`${buffer.trim()}\n\n`));
         }
       }
     }
@@ -181,7 +189,10 @@ Deno.serve(async (request: Request): Promise<Response> => {
   } catch {
     return new Response(
       JSON.stringify({ error: { message: "Invalid JSON" } }),
-      { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      {
+        status: 400,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      },
     );
   }
 
@@ -237,7 +248,8 @@ Deno.serve(async (request: Request): Promise<Response> => {
         status: upstreamResponse.status,
         headers: {
           ...CORS_HEADERS,
-          "Content-Type": upstreamResponse.headers.get("Content-Type") ?? "application/json",
+          "Content-Type":
+            upstreamResponse.headers.get("Content-Type") ?? "application/json",
         },
       });
     }
@@ -251,7 +263,10 @@ Deno.serve(async (request: Request): Promise<Response> => {
     console.error("Upstream error:", err);
     return new Response(
       JSON.stringify({ error: { message: "Upstream request failed" } }),
-      { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      {
+        status: 502,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      },
     );
   }
 });
