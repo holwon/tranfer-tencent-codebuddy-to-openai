@@ -1,0 +1,50 @@
+# escape=`
+
+# ════════════════════════════════════════════════════════════════
+# Windows 容器构建 — 生成 Server.exe
+# ════════════════════════════════════════════════════════════════
+#
+# 前提：Docker 必须切换到 Windows 容器模式
+#   - Docker Desktop: Settings → General → Use the WSL 2 based engine (关闭)
+#     或 Settings → Switch to Windows containers
+#   - 切换后终端重新打开
+#
+# 构建：
+#   docker build -f Dockerfile.windows -t server-windows .
+#
+# 提取 exe（不需要运行容器）：
+#   docker create --name tmp server-windows
+#   docker cp tmp:C:\app\publish\Server.exe .\Server.exe
+#   docker rm tmp
+#
+# 如果需要自包含版本（不依赖 .NET 运行时），改用：
+#   docker build --build-arg SelfContained=true -f Dockerfile.windows -t server-windows .
+#
+
+ARG SelfContained=false
+
+# ─────────────────────────────────────────────
+# Build stage — .NET 9.0 SDK (Windows ServerCore)
+# ─────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:9.0-windowsservercore-ltsc2022 AS build
+WORKDIR C:\src
+
+# 先还原依赖（利用 Docker 缓存）
+COPY ["Server.csproj", "."]
+RUN dotnet restore "Server.csproj"
+
+# 复制代码并发布
+COPY . .
+RUN dotnet publish "Server.csproj" -c Release -o C:\app\publish /p:UseAppHost=false /p:SelfContained=%SelfContained% /p:RuntimeIdentifier=win-x64
+
+# ─────────────────────────────────────────────
+# Runtime stage — .NET 9.0 Runtime (Windows ServerCore)
+# ─────────────────────────────────────────────
+# 注意：WPF 应用需要 Windows Desktop Runtime
+# 如果只是构建+提取 exe，不需要这个 stage
+# ─────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/runtime:9.0-windowsservercore-ltsc2022 AS runtime
+WORKDIR C:\app
+COPY --from=build C:\app\publish .
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "Server.dll"]
