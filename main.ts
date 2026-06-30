@@ -227,8 +227,16 @@ function homepage(): Response {
 /** 健康检查伪装 */
 function healthCheck(): Response {
   return new Response(
-    JSON.stringify({ status: "ok", service: "cloudflow-api", version: "1.2.0", uptime: Math.floor(Date.now() / 1000) }),
-    { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+    JSON.stringify({
+      status: "ok",
+      service: "cloudflow-api",
+      version: "1.2.0",
+      uptime: Math.floor(Date.now() / 1000),
+    }),
+    {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    },
   );
 }
 
@@ -249,7 +257,11 @@ Deno.serve(async (request: Request): Promise<Response> => {
   // API 路径路由
   const apiPath = url.pathname.replace(/^\/+v\d+/, "").replace(/\/+$/, "");
 
-  if (request.method === "POST" && (url.pathname.includes("/chat/completions") || apiPath === "/chat/completions")) {
+  if (
+    request.method === "POST" &&
+    (url.pathname.includes("/chat/completions") ||
+      apiPath === "/chat/completions")
+  ) {
     return await handleChatCompletion(request);
   }
 
@@ -263,7 +275,6 @@ Deno.serve(async (request: Request): Promise<Response> => {
 
 /** 处理 chat completions 请求 */
 async function handleChatCompletion(request: Request): Promise<Response> {
-
   // 解析请求体
   let requestObj: Record<string, unknown>;
   try {
