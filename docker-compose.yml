@@ -1,0 +1,6 @@
+services:
+  codebuddy-proxy:
+    build: .
+    ports:
+      - "8123:8123"
+    restart: unless-stopped
