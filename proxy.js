@@ -18,10 +18,9 @@
  *   转换:        [] → 删除该字段
  *
  * delta.reasoning_content:
- *   OpenAI 标准: o1/o3 系列用，普通模型不返回
+ *   OpenAI 标准: o1/o3/o4 等推理模型的标准字段，VS Code 可以渲染
  *   CodeBuddy:   DeepSeek 扩展，返回推理过程
- *   转换:        VS Code Copilot 不支持 reasoning 渲染，
- *                无法直接展示 thinking 内容
+ *   转换:        保留，VS Code Copilot 遵守 OpenAI 标准，可以渲染
  *
  * delta.extra_fields:
  *   OpenAI 标准: 不存在
@@ -49,17 +48,12 @@
  *   转换:        null 时删除
  *
  * ═══════════════════════════════════════════════════════════════
- * 注意：thinking / reasoning 内容的限制
+ * thinking / reasoning 内容
  * ═══════════════════════════════════════════════════════════════
  *
- * VS Code Copilot 的 customendpoint 解析器只认：
- *   - delta.content (文本)
- *   - delta.tool_calls (工具调用)
- *
- * CodeBuddy 的 reasoning_content 是 DeepSeek 扩展字段，
- * VS Code Copilot 无法渲染 thinking/reasoning 内容。
- * 如果模型同时返回 reasoning + content，用户只能看到 content 部分。
- * 想看到 thinking 输出，需要在终端用 simple-chat.js 直接调用。
+ * OpenAI 标准中 reasoning_content 是推理模型的标准字段，
+ * VS Code Copilot 遵守 OpenAI 标准，可以渲染此字段。
+ * 代理只需确保字段名和格式符合规范即可。
  */
 
 import http from 'node:http';
@@ -116,7 +110,10 @@ function convertDelta(cbDelta) {
   }
   // 空数组 [] → 不添加（CodeBuddy 的默认空工具调用）
 
-  // reasoning_content → 删除（VS Code Copilot 不支持渲染 reasoning）
+  // reasoning_content → 保留（OpenAI 标准字段，VS Code Copilot 可渲染）
+  if (cbDelta.reasoning_content !== undefined && cbDelta.reasoning_content !== null) {
+    result.reasoning_content = cbDelta.reasoning_content;
+  }
   // function_call → 删除（OpenAI 已废弃）
   // refusal → 删除（非标准字段）
   // extra_fields → 删除（CodeBuddy 自定义字段）
