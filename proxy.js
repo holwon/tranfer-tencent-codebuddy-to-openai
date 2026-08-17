@@ -18,50 +18,163 @@
  *   转换:        [] → 删除该字段
  *
  * delta.reasoning_content:
- *   OpenAI 标准: o1/o3/o4 等推理模型的标准字段，VS Code 可以渲染
+ *   OpenAI 标准: o1/o3/o4 等推理模型的标准字段
  *   CodeBuddy:   DeepSeek 扩展，返回推理过程
- *   转换:        保留，VS Code Copilot 遵守 OpenAI 标准，可以渲染
+ *   转换:        保留（VS Code 可渲染），但注意其产生的大量 thinking
+ *                tokens 会全额计入 CodeBuddy 的 completion 计费
  *
- * delta.extra_fields:
- *   OpenAI 标准: 不存在
- *   CodeBuddy:   null
- *   转换:        删除
- *
- * delta.function_call:
- *   OpenAI 标准: 已废弃（被 tool_calls 取代）
- *   CodeBuddy:   null
- *   转换:        删除
- *
- * delta.refusal:
- *   OpenAI 标准: 不存在
- *   CodeBuddy:   ""
- *   转换:        删除
- *
- * choice.logprobs:
- *   OpenAI 标准: 可选
- *   CodeBuddy:   null
- *   转换:        null 时删除
- *
- * usage:
- *   OpenAI 标准: 可选
- *   CodeBuddy:   null
- *   转换:        null 时删除
+ * delta.extra_fields / function_call / refusal:
+ *   CodeBuddy 自定义噪音字段 → 删除
  *
  * ═══════════════════════════════════════════════════════════════
- * thinking / reasoning 内容
+ * 注意（2026-08 实测）
  * ═══════════════════════════════════════════════════════════════
  *
- * OpenAI 标准中 reasoning_content 是推理模型的标准字段，
- * VS Code Copilot 遵守 OpenAI 标准，可以渲染此字段。
- * 代理只需确保字段名和格式符合规范即可。
+ * reasoning_effort / max_tokens / stream 等请求参数一律原样透传，
+ * 由客户端（VS Code chatLanguageModels.json）完全决定，代理不干预。
+ *
+ * 实测结论（供客户端配置参考，不在代理层处理）：
+ * - CodeBuddy 将 thinking tokens 全额计入 completion 计费；
+ *   reasoning_effort 越高，thinking 越多，积分消耗越大
+ * - CodeBuddy 拒绝非流式请求（code 11101），客户端应始终使用 stream: true
+ * - 回传 assistant.reasoning_content 不增加 prompt_tokens、不破坏前缀缓存
  */
 
 import http from 'node:http';
 import https from 'node:https';
 import { URL } from 'node:url';
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
-const PORT = 8123;
+// ═══════════════════════════════════════════════════════════════
+// .env 文件加载（轻量实现，不引入 dotenv 依赖）
+// ═══════════════════════════════════════════════════════════════
+// 在 proxy.js 同目录下创建 .env 文件，格式：
+//   DEBUG=true
+//   CB_PORT=8123
+//   LOG_DIR=./logs
+//   LOG_REQ_FILE=request.log
+//   LOG_RESP_FILE=response.log
+// 已存在的系统环境变量优先于 .env（不覆盖）。
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ENV_PATH = join(__dirname, '.env');
+if (existsSync(ENV_PATH)) {
+  const envContent = readFileSync(ENV_PATH, 'utf8');
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('//')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
+    // 不覆盖已有的系统环境变量
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+const PORT = Number(process.env.CB_PORT) || 8123;
 const CODEBUDDY_URL = 'https://copilot.tencent.com/v2/chat/completions';
+
+// ─── 日志配置 ───
+// DEBUG=true：将请求 body 与 SSE chunk 记录到本地 JSONL 文件；否则不写入任何文件。
+// 参照 docker-opencode-proxy 的磁盘日志结构：请求与响应分文件、按天滚动、JSONL 格式。
+const DEBUG = process.env.DEBUG === 'true';
+
+// 日志目录（可用 .env 配置）
+const LOG_DIR = process.env.LOG_DIR || './logs';
+const LOG_DIR_PATH = resolve(__dirname, LOG_DIR);
+
+// 确保日志目录存在
+try {
+  mkdirSync(LOG_DIR_PATH, { recursive: true });
+} catch {
+  // 目录创建失败时退化为仅控制台输出
+}
+
+/** 获取当天日期字符串 YYYY-MM-DD */
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** 获取当前 ISO 时间戳 */
+function nowTs() {
+  return new Date().toISOString();
+}
+
+/** 异步追加一行 JSON 到指定文件（写失败仅 console.error，不阻塞主流程） */
+function appendLineAsync(filePath, data) {
+  try {
+    appendFileSync(filePath, JSON.stringify(data) + '\n', 'utf8');
+  } catch (err) {
+    console.error(`[logger] 写入失败: ${filePath}`, err);
+  }
+}
+
+/**
+ * 生成唯一请求 ID（与 docker-opencode-proxy 一致，使用 randomUUID）。
+ * @returns {string}
+ */
+function newRequestId() {
+  return randomUUID();
+}
+
+/**
+ * 在记录原始请求体前脱敏 authorization / x-api-key 字段，避免密钥落盘。
+ * @param {string} rawBody 原始请求 JSON 字符串
+ * @returns {object} 脱敏后的对象
+ */
+function redactAuth(rawBody) {
+  let obj;
+  try {
+    obj = JSON.parse(rawBody);
+  } catch {
+    return {};
+  }
+  if (obj && typeof obj === 'object') {
+    if (obj.authorization) obj.authorization = '<REDACTED>';
+    if (obj['x-api-key']) obj['x-api-key'] = '<REDACTED>';
+  }
+  return obj;
+}
+
+/**
+ * 将请求元数据 + body 写入 requests-YYYY-MM-DD.jsonl（仅 DEBUG=true 时执行）。
+ * 字段与 docker-opencode-proxy 的 logRequestToDisk 完全一致。
+ */
+function logRequestToDisk(requestId, meta, body) {
+  if (!DEBUG) return;
+  const filePath = join(LOG_DIR_PATH, `requests-${today()}.jsonl`);
+  appendLineAsync(filePath, {
+    ts: nowTs(),
+    requestId,
+    method: meta.method,
+    path: meta.path,
+    model: meta.model,
+    provider: meta.provider,
+    stream: meta.stream,
+    clientRequestId: meta.clientRequestId,
+    body,
+  });
+}
+
+/**
+ * 将单个原始 SSE chunk（data: 后的 JSON 对象）写入 streams-YYYY-MM-DD.jsonl。
+ * 字段与 docker-opencode-proxy 的 logStreamChunkToDisk 完全一致。
+ */
+function logStreamChunkToDisk(requestId, model, chunk) {
+  if (!DEBUG) return;
+  const filePath = join(LOG_DIR_PATH, `streams-${today()}.jsonl`);
+  appendLineAsync(filePath, {
+    ts: nowTs(),
+    requestId,
+    model,
+    chunk,
+  });
+}
 
 // ─── OpenAI 标准 finish_reason 值 ───
 const VALID_FINISH_REASONS = new Set(['stop', 'tool_calls', 'length', 'content_filter', null]);
@@ -76,11 +189,12 @@ const VALID_FINISH_REASONS = new Set(['stop', 'tool_calls', 'length', 'content_f
  *   function_call?: ...   - 已废弃
  *
  * CodeBuddy 额外字段（需删除）：
- *   reasoning_content     - DeepSeek 扩展，VS Code 不渲染
  *   extra_fields           - CodeBuddy 自定义
  *   refusal                - CodeBuddy 自定义
  *   function_call          - 已废弃
  *   tool_calls: []         - 空数组 = 不应出现
+ *
+ * reasoning_content 透传保留（VS Code 可渲染；实测不增加计费）。
  */
 function convertDelta(cbDelta) {
   if (!cbDelta) return {};
@@ -199,12 +313,26 @@ function convertResponse(cbData) {
 }
 
 /**
- * 请求转换：
+ * 请求转换：原样透传客户端请求，不修改任何参数。
+ *
  * 保留 tools 和 tool_choice，VS Code Copilot 靠模型返回 tool_calls 来本地执行工具。
- * 不依赖 GitHub Copilot 自带模型——其他本地模型（如 Ollama）也能正常调用工具。
+ * reasoning_effort、max_tokens、stream 等全部由客户端决定——本代理不做任何
+ * 干预，确保客户端的功能完整（例如用户显式选择高思考档位时必须生效）。
  */
 function convertRequest(reqBody) {
   return { ...reqBody };
+}
+
+/**
+ * 检测 CodeBuddy 错误信封（{ code, msg }，code !== 0 表示失败）。
+ * 这些错误可能出现在 HTTP 200 的流中，需要识别并转发为 OpenAI 风格错误。
+ */
+function detectCodeBuddyError(payload) {
+  if (typeof payload !== 'object' || payload === null) return null;
+  if (typeof payload.code === 'number' && payload.code !== 0) {
+    return { code: payload.code, msg: typeof payload.msg === 'string' ? payload.msg : String(payload.msg ?? '') };
+  }
+  return null;
 }
 
 // ─── HTTP 服务器 ───
@@ -241,10 +369,25 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const toolCount = requestObj.tools?.length ?? 0;
-  console.log(`[${new Date().toISOString()}] → ${requestObj.model} | stream: ${requestObj.stream} | tools: ${toolCount}`);
+  // 生成唯一请求 ID，用于对齐 request.log 与 response.log
+  const requestId = newRequestId();
+  const rid = `[${requestId}]`;
 
-  // DTO 转换请求
+  const toolCount = requestObj.tools?.length ?? 0;
+  // 控制台摘要（始终输出，便于实时监控）
+  console.log(`[${rid}] → ${requestObj.model} | stream: ${requestObj.stream} | tools: ${toolCount} | effort: ${requestObj.reasoning_effort ?? '(未设置)'} | max_tokens: ${requestObj.max_tokens ?? '(未设置)'}`);
+
+  // 落盘：原始请求对象（脱敏 authorization 后原样记录），写入 requests-*.jsonl
+  logRequestToDisk(requestId, {
+    method: req.method,
+    path: req.url,
+    model: requestObj.model,
+    provider: 'codebuddy',
+    stream: requestObj.stream === true,
+    clientRequestId: req.headers['x-request-id'] || req.headers['client-request-id'] || undefined,
+  }, redactAuth(body));
+
+  // 请求原样透传（不修改客户端参数）
   const convertedReq = convertRequest(requestObj);
 
   // 构建转发请求
@@ -271,27 +414,40 @@ const server = http.createServer(async (req, res) => {
       let errorBody = '';
       proxyRes.on('data', (chunk) => { errorBody += chunk; });
       proxyRes.on('end', () => {
-        console.log(`  ← ${proxyRes.statusCode} (error)`);
+        console.log(`[${rid}] ← ${proxyRes.statusCode} (error)`);
+        // 落盘：原始错误响应写入 streams-*.jsonl
+        logStreamChunkToDisk(requestId, requestObj.model, { type: 'error', status: proxyRes.statusCode, body: errorBody });
         res.writeHead(proxyRes.statusCode, { 'Content-Type': 'application/json' });
         res.end(errorBody);
       });
       return;
     }
 
-    const isStream = convertedReq.stream;
+    // 强制流式后 convertedReq.stream 恒为 true；保留 isStream 判断作为防御
+    const isStream = convertedReq.stream === true || convertedReq.stream === undefined;
 
     if (!isStream) {
-      // 非流式：完整接收后转换再返回
+      // 非流式：完整接收后转换再返回（正常情况下不会走到这里，
+      // 因为 convertRequest 强制 stream: true；保留兜底）
       let fullBody = '';
       proxyRes.on('data', (chunk) => { fullBody += chunk; });
       proxyRes.on('end', () => {
         try {
           const parsed = JSON.parse(fullBody);
+          const cbError = detectCodeBuddyError(parsed);
+          if (cbError) {
+            console.log(`[${rid}] ← ${cbError.code} (CodeBuddy error)`);
+            logStreamChunkToDisk(requestId, requestObj.model, { type: 'codebuddy-error', code: cbError.code, msg: cbError.msg });
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: `CodeBuddy error ${cbError.code}: ${cbError.msg}` } }));
+            return;
+          }
           const converted = convertResponse(parsed);
-          console.log(`  ← 200 (converted non-stream)`);
+          logStreamChunkToDisk(requestId, requestObj.model, parsed);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(converted));
         } catch {
+          logStreamChunkToDisk(requestId, requestObj.model, { type: 'non-streaming-raw', body: fullBody });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(fullBody);
         }
@@ -330,6 +486,17 @@ const server = http.createServer(async (req, res) => {
           const jsonStr = trimmed.slice(6);
           try {
             const parsed = JSON.parse(jsonStr);
+            // 落盘：原始上游 SSE chunk（data: 后的 JSON 对象），不记录转换后结果
+            logStreamChunkToDisk(requestId, requestObj.model, parsed);
+            // CodeBuddy 错误信封可能出现在 HTTP 200 的流中
+            const cbError = detectCodeBuddyError(parsed);
+            if (cbError) {
+              console.log(`[${rid}] ← ${cbError.code} (CodeBuddy error in stream)`);
+              res.write(`data: ${JSON.stringify({ error: { message: `CodeBuddy error ${cbError.code}: ${cbError.msg}` } })}\n\n`);
+              res.write('data: [DONE]\n\n');
+              res.end();
+              return;
+            }
             const converted = convertResponse(parsed);
             res.write(`data: ${JSON.stringify(converted)}\n\n`);
           } catch {
@@ -344,30 +511,37 @@ const server = http.createServer(async (req, res) => {
 
     proxyRes.on('end', () => {
       if (buffer.trim()) {
-        if (buffer.trim() === 'data: [DONE]') {
+        const leftover = buffer.trim();
+        if (leftover === 'data: [DONE]') {
           res.write('data: [DONE]\n\n');
-        } else if (buffer.trim().startsWith('data: ')) {
+        } else if (leftover.startsWith('data: ')) {
           try {
-            const parsed = JSON.parse(buffer.trim().slice(6));
-            const converted = convertResponse(parsed);
-            res.write(`data: ${JSON.stringify(converted)}\n\n`);
+            const parsed = JSON.parse(leftover.slice(6));
+            const cbError = detectCodeBuddyError(parsed);
+            if (cbError) {
+              console.log(`[${rid}] ← ${cbError.code} (CodeBuddy error in stream)`);
+              res.write(`data: ${JSON.stringify({ error: { message: `CodeBuddy error ${cbError.code}: ${cbError.msg}` } })}\n\n`);
+            } else {
+              const converted = convertResponse(parsed);
+              res.write(`data: ${JSON.stringify(converted)}\n\n`);
+            }
           } catch {
-            res.write(`${buffer.trim()}\n\n`);
+            res.write(`${leftover}\n\n`);
           }
         }
       }
       res.end();
-      console.log(`  ← 200 (stream converted)`);
+      console.log(`[${rid}] ← 200 (stream end)`);
     });
 
     proxyRes.on('error', (err) => {
-      console.error(`  ← stream error: ${err.message}`);
+      console.log(`[${rid}] ← stream error: ${err.message}`);
       res.end();
     });
   });
 
   proxyReq.on('error', (err) => {
-    console.error(`  → request error: ${err.message}`);
+    console.log(`[${rid}] → request error: ${err.message}`);
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { message: `Proxy error: ${err.message}` } }));
   });
@@ -378,5 +552,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🔗 CodeBuddy Proxy (DTO Converter) on http://0.0.0.0:${PORT}`);
-  console.log(`   Target: ${CODEBUDDY_URL}\n`);
+  console.log(`   Target: ${CODEBUDDY_URL}`);
+  console.log(`   DEBUG: ${DEBUG ? 'ON (请求/响应写入 JSONL 日志)' : 'OFF (不写磁盘日志，设置 DEBUG=true 开启)'}`);
+  console.log(`   LOG: ${join(LOG_DIR_PATH, 'requests-YYYY-MM-DD.jsonl')}`);
+  console.log(`        ${join(LOG_DIR_PATH, 'streams-YYYY-MM-DD.jsonl')}`);
+  console.log('');
 });

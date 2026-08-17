@@ -5,6 +5,11 @@
 
 # dotenv files
 .env
+# (保留 .env.example 模板可提交)
+
+# Proxy logs
+logs/
+*.log
 
 # User-specific files
 *.rsuser
